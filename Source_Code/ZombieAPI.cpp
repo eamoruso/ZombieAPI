@@ -54,6 +54,37 @@ constexpr int DEFAULT_CRAWL_DEPTH = 1;
 constexpr int DEFAULT_THREADS = 10;
 constexpr int DEFAULT_DELAY_MS = 0;
 
+// Zombie scoring weights (Table V in methodology):
+// Z(e) = w1*se + w2*me + w3*ve + w4*fe + w5*re
+constexpr double W_SE = 0.16;  // reachability
+constexpr double W_ME = 0.27;  // method divergence
+constexpr double W_VE = 0.13;  // version inconsistency
+constexpr double W_FE = 0.29;  // fuzz-induced deviation
+constexpr double W_RE = 0.15;  // response anomalies vs baseline
+// Threshold θ for classifying an endpoint as zombie (paper Eq. 2)
+constexpr double THETA_ZOMBIE = 40.3;
+// Lower reporting threshold to show near-zombie endpoints
+constexpr double THETA_REPORTING = 25.0;
+
+struct ZombieSignal {
+    bool se = false;   // Reachability: endpoint responds with non-404 status (w1)
+    bool me = false;   // Method divergence: responds to HTTP methods other than GET (w2)
+    bool ve = false;   // Version inconsistency: persisted across deprecated versions (w3)
+    bool fe = false;   // Fuzz deviation: fingerprint deviates from baseline 404 (w4)
+    bool re = false;   // Response anomaly: anomalous vs declared behavior / body fingerprint mismatch (w5)
+};
+
+struct ZombieEvidence {
+    string url;
+    ZombieSignal signals;
+    double z_score = 0.0;          // final Z(e) value
+    void computeScore() {
+        z_score = W_SE * signals.se  + W_ME * signals.me  + W_VE * signals.ve  + W_FE * signals.fe  + W_RE * signals.re;
+    }
+    bool is_zombie() const { return z_score >= THETA_ZOMBIE; }
+    bool should_report() const    { return z_score >= THETA_REPORTING; }
+};
+
 // --- Data Structures (moved up for forward declarations) ---
 struct HttpResult {
     long status = 0;
@@ -499,7 +530,7 @@ struct CsvRecord {
 // --- Extraction Logic ---
 static const regex RE_API_PATH(R"((["'`]?)(/api/[^"'`\s<>]{3,}))");
 static const regex RE_ABS_API(R"((["'`]?)(https?://[^/\s"'`]+/api/[^\s"'`]+))");
-static const regex RE_GENERIC_PATH(R"((["'`]?) (/[a-zA-Z0-9_\-/]{3,}))");
+     static const regex RE_GENERIC_PATH(R"((["'`]?)\s?(/[a-zA-Z0-9_\-/]{3,}))");
 
 vector<string> ExtractEndpoints(const string& content, const string& baseUrl) {
     set<string> unique;
@@ -1638,8 +1669,8 @@ void RandomizedFuzz(const string& baseUrl,
                 }
             }
 
-            // Must respond to at least 2 methods (or GET + another)
-            if (respondingMethods.size() < 1) return;
+            // Must respond to at least 2 methods (per FILTER 4 comment)
+            if ((int)respondingMethods.size() < 2) return;
 
             // === FILTER 5: Content negotiation verification ===
             // Try with different Accept headers
