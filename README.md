@@ -7,7 +7,9 @@ Abstract—Modern networked applications expose rapidly evolving REST‑API surf
 2. Then open up a terminal window and navigate to the folder you saved the file to.
 3. Finally, use the following command:  
    g++ ZombieAPI.cpp -o ZombieAPI -lcurl -pthread -std=c++20
-Note: If you have errors compiling, make sure you have the Curl libraries install.
+   
+# Note: 
+If you have errors compiling, make sure you have the Curl libraries install.
 # Running the program (example to see usage with built-in help):
    ./ZombieAPI --help
 # Zombie API detection workflow:
