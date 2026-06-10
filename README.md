@@ -5,11 +5,11 @@ Abstract—Modern networked applications expose rapidly evolving REST‑API surf
 # Instructions (Building the ZombieAPI.cpp on a MacOS)
 1. Download the ZombieAPI.cpp file to a folder on your Mac system,
 2. Then open up a terminal window and navigate to the folder you saved the file to.
-3. Finally, use the following command:  
+3. Finally, use the following command to make the source code executable:  
    g++ ZombieAPI.cpp -o ZombieAPI -lcurl -pthread -std=c++20
-   
 # Note: 
-If you have errors compiling, make sure you have the Curl libraries installed. For example: brew install curl
+If you have errors compiling, make sure you have the Curl libraries installed. 
+   For example: brew install curl
 # Running the program (example to see usage with built-in help):
    ./ZombieAPI --help
 # Zombie API detection workflow:
