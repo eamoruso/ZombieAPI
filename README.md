@@ -12,11 +12,14 @@ If you have errors compiling, make sure you have the Curl libraries installed.
    For example: brew install curl
 # Running the program (example to see usage with built-in help):
    ./ZombieAPI --help
+   
 # Zombie API detection workflow:
 <img width="252" height="255" alt="image" src="https://github.com/user-attachments/assets/f99e4587-ceac-4174-83b4-45323a5385f9" />
+
 # Example running all 4 modules:
 ./ZombieAPI http://localhost --passive-recon --header-probe --changelog-hunt --diff-fuzz  
-# 
+
+#  
 🧠 Application Version: 13.070200
 🚀 Scanning: http://localhost
 🧵 Using 10 threads
