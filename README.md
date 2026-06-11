@@ -16,6 +16,9 @@ If you have errors compiling, make sure you have the Curl libraries installed.
 # Zombie API detection workflow:
 <img width="252" height="255" alt="image" src="https://github.com/user-attachments/assets/f99e4587-ceac-4174-83b4-45323a5385f9" />
 
+<img width="558" height="391" alt="image" src="https://github.com/user-attachments/assets/ffe9452b-1cd9-4e42-b488-65896c49461a" />
+
+
 # Example running all 4 modules:
 ./ZombieAPI http://localhost --passive-recon --header-probe --changelog-hunt --diff-fuzz  
 #  
