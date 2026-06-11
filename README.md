@@ -14,8 +14,9 @@ If you have errors compiling, make sure you have the Curl libraries installed.
    ./ZombieAPI --help
    
 # Zombie API detection workflow:
-<img width="252" height="255" alt="image" src="https://github.com/user-attachments/assets/f99e4587-ceac-4174-83b4-45323a5385f9" />
+<img width="563" height="575" alt="image" src="https://github.com/user-attachments/assets/cebd556d-7abc-4416-94f8-9e26da5070b0" />
 
+# Example when a Zombie API is discovered:
 <img width="558" height="391" alt="image" src="https://github.com/user-attachments/assets/ffe9452b-1cd9-4e42-b488-65896c49461a" />
 
 
