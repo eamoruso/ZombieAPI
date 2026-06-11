@@ -1,28 +1,6 @@
 //
 //  ZombieAPI.cpp
 //
-//  Created by Edward Amoruso on 2/18/26
-//
-//  Updated: 4/9/2026
-//  Updated: 4/20/2026
-//  Updated: 4/25/2026
-//  Added:   5/2/2026  - Hidden/Zombie API discovery:
-//        --passive-recon   : Mine JS bundles, source maps, OpenAPI specs,
-//                           robots.txt, sitemap.xml for undocumented routes.
-//        --header-probe    : Probe shadow routes via Host/X-Forwarded-For/
-//                           X-Original-URL header manipulation.
-//        --changelog-hunt  : Probe debug/actuator/well-known paths that
-//                           leak retired or internal endpoints.
-//        --diff-fuzz       : Baseline-diff responses to flag routes whose
-//                           body fingerprint diverges from a known-404.
-//
-//  Updated: 5/21/2026      : Pending changes (adding more detection capabilities
-//  Updated: 5/22/2026      : Added RandomFuzz Feature, fixed some false positives
-//  Updated: 5/30/2026      : Added file output feature
-//  Updated: 5/31/2026      : Fixed bugs
-//  Updated: 6/05/2026      : Enhanced output file for csv correctness
-//  Updated: 6/11/2026      : Updated scoring engine --passive-recon
-//
 
 #include <iostream>
 #include <string>
