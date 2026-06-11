@@ -101,8 +101,11 @@ If you have errors compiling, make sure you have the Curl libraries installed.
 ✅ [HeaderProbe] Complete. Shadow routes detected: 0
 
 📜 [ChangelogHunt] Probing debug/actuator/well-known paths on: http://localhost
+   
    📜 [SUSPECT] http://localhost/version → HTTP 200
+   
    📜 [SUSPECT] http://localhost/redoc → HTTP 200
+   
    📜 [SUSPECT] http://localhost/metrics → HTTP 200
 
 ✅ [ChangelogHunt] Complete. Debug/internal paths responded: 3
@@ -114,8 +117,9 @@ If you have errors compiling, make sure you have the Curl libraries installed.
 
 ✅ [DiffFuzz] Complete. Deviating (hidden) paths found: 0
 
+----------------------------------------
    ZOMBIE API DISCOVERY - FINAL REPORT            
-
+----------------------------------------
 📊 SUMMARY STATISTICS
 ----------------------------------------
 Total Endpoints Discovered:      42
@@ -130,11 +134,17 @@ Normal API Endpoints:            35 (83%)
 ⚠️  SUSPECT ENDPOINTS (Internal/Debug Paths)
 --------------------------------------------------
   🔍 http://localhost/debug/headers
+  
   🔍 http://localhost/metrics
+  
   🔍 http://localhost/debug/random
+  
   🔍 http://localhost/debug/time
+  
   🔍 http://localhost/config
+  
   🔍 http://localhost/debug/echo
+  
   🔍 http://localhost/debug/status
 
 ✅ NORMAL API ENDPOINTS
@@ -178,8 +188,11 @@ Normal API Endpoints:            35 (83%)
 📋 SECURITY RECOMMENDATIONS
 ----------------------------------------
   • Audit all debug/internal endpoint access controls
+  
   • Restrict /metrics, /config, /logs to internal use
+  
   • Remove or secure open /redoc Swagger UI instances
+  
   • Implement proper authentication for sensitive paths
-
-============================================================
+  
+----------------------------------------
