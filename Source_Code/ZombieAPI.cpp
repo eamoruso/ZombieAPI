@@ -1,6 +1,8 @@
 //
 //  ZombieAPI.cpp
 //
+//  Created by Edward Amoruso on 1/18/26
+//
 
 #include <iostream>
 #include <string>
@@ -115,7 +117,7 @@ mutex g_learningMutex;
 const vector<string> COMMON_API_PATHS = {
     "/api", "/api/v1", "/api/v2", "/api/v3", "/api/v4", "/api/v5",
     "/data", "/data/v1","/data/v2","/data/v3","/data/v4",
-    "/value", "/value/v1", "/value/v2", "/val", "/v1", "/v2"
+    "/value", "/value/v1", "/value/v2", "/val", "/val/1"
 };
 const vector<string> prefixes = {
     "/api", "/v1", "/v2", "/v3", "v4", "/admin", "/internal",
@@ -1014,16 +1016,16 @@ void PassiveRecon(const string& baseUrl, int threads, int delayMs, bool noVerify
             auto paths = ExtractFromOpenApiSpec(r.body, baseUrl);
             int cnt = 0;
             for (const auto& p : paths) {
-                // Classification based on path patterns
+                // Classification based on path patterns  
                 string classify = "NORMAL";
                 
                 // Check for deprecated indicators in path name or version
-                if (p.find("/v0") != string::npos ||
+                if (p.find("/v0") != string::npos || 
                     p.find("/v1/") != string::npos ||  // Old versions likely deprecated
-                    p.find("old") != string::npos ||
+                    p.find("old") != string::npos || 
                     p.find("legacy") != string::npos ||
                     p.find("deprecated") != string::npos) {
-                    classify = "ZOMBIE";
+                    classify = "ZOMBIE";  
                 } else if (p.find("/beta") != string::npos ||
                           p.find("/alpha") != string::npos ||
                           p.find("test") != string::npos ||
@@ -1172,8 +1174,27 @@ void HeaderProbe(const vector<string>& endpoints,
                                    (baseline.size > 64 && probed.size < baseline.size / 2));
 
                 if (statusDiff || sizeDiff) {
+                    
+                    // Classify shadow route detection  
+                    string classify = "SUSPECT";  // Shadow routes are inherently suspicious
+                    int score = 50;
+                    
+                    if (probed.status == 401 || probed.status == 403) {
+                        score += 20;  // Auth-gated shadow routes
+                    } else if (probed.status >= 200 && probed.status < 300) {
+                        score += 30;  // Fully accessible shadow = critical
+                    }
+                    
+                    // Check header type for severity
+                    if (hs.label.find("X-Original-URL") != string::npos ||
+                         hs.label.find("Host: localhost") != string::npos) {
+                        score += 15;  // Gateway bypass is high risk
+                    }
+                    
+                    if (score >= 60) classify = "ZOMBIE";
+                    
                     stringstream ss;
-                    ss << "   👻 [HeaderProbe] SHADOW ROUTE DETECTED: " << ep << "\n"
+                    ss << "   👻 [" + classify + "] SHADOW ROUTE DETECTED: " << ep << "\n"
                        << "      Header set : " << hs.label << "\n"
                        << "      Baseline   : HTTP " << baseline.status
                        << " / " << baseline.size << " bytes\n"
@@ -1253,12 +1274,44 @@ void ChangelogHunt(const string& baseUrl, int threads, int delayMs, bool noVerif
             if (r.success && (r.status == 200 || r.status == 206 ||
                               r.status == 401 || r.status == 403 ||
                               r.status == 405 || r.status == 301 || r.status == 302)) {
-                string tag = (r.status == 401 || r.status == 403)
-                                  ? " [auth-gated zombie]"
-                                  : (r.status == 301 || r.status == 302)
-                                    ? " [redirect — may reveal internal host]"
-                                    : "";
-                SafePrint("   📜 [ChangelogHunt] " + url +
+                
+                // Classify endpoint based on path and response characteristics
+                string classify = "NORMAL";
+                int score = 40;  // Base score for being a debug/internal path
+                
+                if (r.status == 401 || r.status == 403) {
+                    score += 25;  // Auth-gated internal paths are highly suspicious
+                } else if (r.status == 200) {
+                    score += 15;  // Open debug endpoints are critical issues
+                } else if (r.status == 301 || r.status == 302) {
+                    score += 10;  // Redirects may leak internal structure
+                }
+                
+                // Check path patterns
+                if (path.find("v0") != string::npos || 
+                    path.find("legacy") != string::npos ||
+                    path.find("_old") != string::npos) {
+                    score += 25;
+                } else if (path.find("debug") != string::npos ||
+                          path.find("internal") != string::npos ||
+                          path.find("_hidden") != string::npos) {
+                    score += 15;  
+                } else if (path.find("/v1/") != string::npos ||  // Old versions
+                          path.find("/beta") != string::npos) {
+                    score += 10;
+                }
+                
+                if (score >= 60) classify = "ZOMBIE";
+                else if (score >= 50) classify = "SUSPECT";
+                
+                string tag = "";
+                if (r.status == 401 || r.status == 403) {
+                    tag += " [auth-gated]";  
+                } else if (r.status == 301 || r.status == 302) {
+                    tag += " [redirect]";
+                }
+                
+                SafePrint("   📜 [" + classify + "] " + url + 
                           " → HTTP " + to_string(r.status) + tag);
                 AddEndpoint(url);
 
@@ -1368,8 +1421,33 @@ void DiffFuzz(const string& baseUrl,
             bool bodyDeviation   = (fp != baseFingerprint);
 
             if (statusDeviation || bodyDeviation) {
+                
+                // Classify hidden endpoint from DiffFuzz  
+                string classify = "NORMAL";
+                int score = 65;  // Hidden by nature of deviating from 404
+                
+                if (r.status == 200 || r.status == 201 || r.status == 204) {
+                    score += 15;  // Success codes on hidden paths
+                    classify = "ZOMBIE";
+                } else if (r.status == 301 || r.status == 302) {  
+                    score += 10;
+                } else if (r.status == 401 || r.status == 403) {
+                    score += 5;  // Auth-gated hidden endpoint
+                }
+                
+                // Check path patterns for versioning or suspicious names
+                if (path.find("/v0") != string::npos || 
+                    regex_search(path, regex(R"((/v[0-9]+)(/|$))"))) {
+                    score += 15;
+                    classify = "ZOMBIE";
+                } else if (!classify.empty() && classify == "NORMAL" && score >= 70) {
+                    classify = "SUSPECT";  
+                }
+                
+                if (classify == "NORMAL") classify = "HIDDEN";  // Label normal hidden endpoints
+                
                 stringstream ss;
-                ss << "   🔬 [DiffFuzz] DEVIATION at: " << url << "\n"
+                ss << "   🔬 [" + classify + "] Hidden endpoint: " << url << "\n"
                    << "      Status  : " << baseStatus << " → " << r.status
                    << (statusDeviation ? " ⚠️" : "") << "\n"
                    << "      Body fp : " << (bodyDeviation ? "DIFFERS" : "same");
@@ -1708,19 +1786,40 @@ void RandomizedFuzz(const string& baseUrl,
             int finalConfidence = CalculateConfidenceScore(verify);
             if (finalConfidence < 60) return;  // Higher threshold after verification
 
-            // ✅ VERIFIED API ENDPOINT
-            stringstream ss;
-            ss << " 🎲 [RandomizedFuzz] VERIFIED API ENDPOINT: " << candidate << "\n"
-               << " Status: " << r.status
-               << " | Size: " << r.size << " bytes"
-               << " | Confidence: " << finalConfidence << "/100"
-               << " | Methods: ";
-            for (size_t j = 0; j < respondingMethods.size(); j++) {
-                if (j > 0) ss << ",";
-                ss << respondingMethods[j];
+            // ✅ VERIFIED API ENDPOINT - Classify it 
+            string classify = "NORMAL";  // RandomizedFuzz finds real APIs, most are likely normal
+            int score = finalConfidence;  // Use existing confidence as base
+            
+            // Higher confidence with success codes suggests real working API (not zombie)
+            if (r.status == 200 && finalConfidence >= 80) {
+                classify = "NORMAL";  
+            } else if (finalConfidence < 50 || r.status == 401 || r.status == 403) {
+                // Low confidence or auth-gated might be zombie/suspect
+                score -= 20;
             }
-            ss << " | JSON: " << (jsonResponse ? "✓" : "✗")
-               << " | XML: " << (xmlResponse ? "✓" : "✗");
+            
+            // Check path for versioning/deprecated indicators  
+            if (candidate.find("/v0") != string::npos || 
+                regex_search(candidate, regex(R"((/v[0-9]+)(/|$))"))) {
+                classify = "ZOMBIE";  // Versioned endpoints are potential zombies
+            } else if (candidate.find("legacy") != string::npos ||  
+                      candidate.find("beta") != string::npos) {
+                classify = "SUSPECT";
+            }
+            
+            stringstream ss;
+            ss << " 🎲 [" + classify + "] VERIFIED API: " << candidate << "\n"
+               << "    Status: " << r.status
+               << " | Size: " << r.size << " bytes"
+               << " | Confidence: " << finalConfidence << "/100"  
+               << " | Score: " << score;
+            if (!respondingMethods.empty()) {
+                ss << " | Methods: ";
+                for (size_t j = 0; j < respondingMethods.size(); j++) {
+                    if (j > 0) ss << ",";
+                    ss << respondingMethods[j];
+                }
+            }
 
             SafePrint(ss.str());
 
@@ -1871,11 +1970,119 @@ int main(int argc, const char* argv[]) {
 
         SafePrint("🔍 Total distinct API endpoints: " + to_string(apiCount));
     } else {
-        SafePrint("\n--- Final Zombie API Report ---");
-        SafePrint("🔍 Total distinct endpoints: " + to_string(allEndpoints.size()));
+        // Enhanced Final Report with Statistics and Classification Summary
+        SafePrint("\n" + string(60, '='));
+        SafePrint("         ZOMBIE API DISCOVERY - FINAL REPORT          ");
+        SafePrint(string(60, '=') + "\n");
+        
+        int zombieCount = 0, suspectCount = 0, normalCount = 0;
+        vector<string> zombieEndpoints, suspectEndpoints, normalEndpoints;
+        unordered_map<string, string> endpointClassifications;
+        
+        // Classify all endpoints
         for (const auto& ep : allEndpoints) {
-            SafePrint("   🧟 " + ep);
+            if (ep.find("[source-map]") == 0 || ep.find("[shadow") != string::npos) continue;
+            
+            bool isVersioned = regex_search(ep, regex(R"((v[0-9]+|beta|alpha|legacy|deprecated)[/_\s])"));
+            bool isDebugPath = (ep.find("/debug/") != string::npos || 
+                               ep.find("/metrics") != string::npos ||
+                               ep.find("/config") != string::npos ||
+                               (ep.find("/logs") == 0 && ep.size() < 30));  // Only flag simple /logs paths
+            
+            if (isVersioned) {
+                endpointClassifications[ep] = "ZOMBIE";
+                zombieCount++;
+                zombieEndpoints.push_back(ep);
+            } else if (isDebugPath) {
+                endpointClassifications[ep] = "SUSPECT";
+                suspectCount++;
+                suspectEndpoints.push_back(ep);
+            } else {
+                endpointClassifications[ep] = "NORMAL";
+                normalCount++;
+                normalEndpoints.push_back(ep);
+            }
         }
+        
+        int total = zombieCount + suspectCount + normalCount;
+        
+        // Summary Statistics
+        SafePrint("\n📊 SUMMARY STATISTICS");
+        SafePrint(string(40, '-'));
+        if (total > 0) {
+            double zombiePct = (double)zombieCount / total * 100.0;
+            double suspectPct = (double)suspectCount / total * 100.0;
+            double normalPct = (double)normalCount / total * 100.0;
+            
+            SafePrint("Total Endpoints Discovered:      " + to_string(total));
+            SafePrint("Zombie APIs Detected:            " + to_string(zombieCount) + 
+                     " (" + to_string((int)zombiePct) + "%)");
+            SafePrint("Suspect Endpoints Found:         " + to_string(suspectCount) + 
+                     " (" + to_string((int)suspectPct) + "%)");  
+            SafePrint("Normal API Endpoints:            " + to_string(normalCount) + 
+                     " (" + to_string((int)normalPct) + "%)\n");
+        } else {
+            SafePrint("No valid endpoints found in scan.\n");
+        }
+        
+        // Key Discoveries - Zombies
+        if (!zombieEndpoints.empty()) {
+            SafePrint("\n🧟 ZOMBIE API ENDPOINTS DETECTED (Lifecycle Violations)");
+            SafePrint(string(50, '-'));
+            for (const auto& ep : zombieEndpoints) {
+                SafePrint("  ⚡ " + ep);
+            }
+        }
+        
+        // Key Discoveries - Suspects  
+        if (!suspectEndpoints.empty()) {
+            SafePrint("\n⚠️  SUSPECT ENDPOINTS (Internal/Debug Paths)");
+            SafePrint(string(50, '-'));
+            for (const auto& ep : suspectEndpoints) {
+                SafePrint("  🔍 " + ep);
+            }
+        }
+        
+        // Key Discoveries - Normal APIs (if any)
+        if (!normalEndpoints.empty()) {
+            SafePrint("\n✅ NORMAL API ENDPOINTS");
+            SafePrint(string(50, '-'));
+            int shown = 0;
+            for (const auto& ep : normalEndpoints) {
+                if (shown < 15 || zombieCount + suspectCount > 0) {
+                    SafePrint("  ✓ " + ep);
+                    shown++;
+                } else if (shown == 15 && zombieCount + suspectCount == 0) {
+                    SafePrint("  ... and " + to_string(normalEndpoints.size() - 15) + " more");  
+                    break;
+                }
+            }
+        }
+        
+        // Recommendations
+        if (zombieCount > 0 || suspectCount > 0) {
+            SafePrint("\n📋 SECURITY RECOMMENDATIONS");
+            SafePrint(string(40, '-'));
+            
+            if (zombieCount > 0) {
+                SafePrint("  • Review and document all zombie APIs or decommission");
+                SafePrint("  • Implement API lifecycle governance policies");
+                SafePrint("  • Add versioning enforcement at gateway level");
+                SafePrint("  • Schedule deprecated endpoints for removal\n");
+            }
+            
+            if (suspectCount > 0) {
+                SafePrint("  • Audit all debug/internal endpoint access controls");
+                SafePrint("  • Restrict /metrics, /config, /logs to internal use");
+                SafePrint("  • Remove or secure open /redoc Swagger UI instances");
+                SafePrint("  • Implement proper authentication for sensitive paths\n");
+            }
+        } else {
+            SafePrint("\n✅ SCAN COMPLETE: No zombie APIs detected!");
+            SafePrint("   All endpoints appear to be properly documented and current.\n");
+        }
+        
+        SafePrint(string(60, '='));
     }
     SafePrint("\n--- Crawl Results ---");
     for (const auto& page : pages) {
