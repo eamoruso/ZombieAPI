@@ -3,6 +3,26 @@
 //
 //  Created by Edward Amoruso on 2/18/26
 //
+//  Updated: 4/9/2026
+//  Updated: 4/20/2026
+//  Updated: 4/25/2026
+//  Added:   5/2/2026  - Hidden/Zombie API discovery:
+//        --passive-recon   : Mine JS bundles, source maps, OpenAPI specs,
+//                           robots.txt, sitemap.xml for undocumented routes.
+//        --header-probe    : Probe shadow routes via Host/X-Forwarded-For/
+//                           X-Original-URL header manipulation.
+//        --changelog-hunt  : Probe debug/actuator/well-known paths that
+//                           leak retired or internal endpoints.
+//        --diff-fuzz       : Baseline-diff responses to flag routes whose
+//                           body fingerprint diverges from a known-404.
+//
+//  Updated: 5/21/2026      : Pending changes (adding more detection capabilities
+//  Updated: 5/22/2026      : Added RandomFuzz Feature, fixed some false positives
+//  Updated: 5/30/2026      : Added file output feature
+//  Updated: 5/31/2026      : Fixed bugs
+//  Updated: 6/05/2026      : Enhanced output file for csv correctness
+//  Updated: 6/11/2026      : Updated scoring engine --passive-recon
+//
 
 #include <iostream>
 #include <string>
@@ -23,8 +43,8 @@
 #include <random>
 #include <curl/curl.h>
 
-#define APP_VERSION 13.0701
-#define RANDOM_FUZZ_LIMIT 713
+#define APP_VERSION 13.0702
+#define RANDOM_FUZZ_LIMIT 7013
 
 using namespace std;
 
@@ -116,7 +136,8 @@ mutex g_learningMutex;
 
 const vector<string> COMMON_API_PATHS = {
     "/api", "/api/v1", "/api/v2", "/api/v3", "/api/v4", "/api/v5",
-    "/data", "/value", "/num", "/val", "/apis"
+    "/data", "/data/v1","/data/v2","/data/v3","/data/v4",
+    "/value", "/value/v1", "/value/v2", "/val", "/v1", "/v2"
 };
 const vector<string> prefixes = {
     "/api", "/v1", "/v2", "/v3", "v4", "/admin", "/internal",
@@ -125,7 +146,8 @@ const vector<string> prefixes = {
 };
 const vector<string> words = {
     "endpoint", "api", "data", "dump", "users", "orders",
-    "metrics", "keys", "auth", "config", "status"
+    "metrics", "keys", "auth", "config", "status", "version",
+    "card", "cc", "inventory", "entry", "range", "credit"
 };
 
 // Forward declarations
@@ -1014,7 +1036,24 @@ void PassiveRecon(const string& baseUrl, int threads, int delayMs, bool noVerify
             auto paths = ExtractFromOpenApiSpec(r.body, baseUrl);
             int cnt = 0;
             for (const auto& p : paths) {
-                SafePrint("   🧟 [spec] Undocumented/hidden route: " + p);
+                // Classification based on path patterns
+                string classify = "NORMAL";
+                
+                // Check for deprecated indicators in path name or version
+                if (p.find("/v0") != string::npos ||
+                    p.find("/v1/") != string::npos ||  // Old versions likely deprecated
+                    p.find("old") != string::npos ||
+                    p.find("legacy") != string::npos ||
+                    p.find("deprecated") != string::npos) {
+                    classify = "ZOMBIE";
+                } else if (p.find("/beta") != string::npos ||
+                          p.find("/alpha") != string::npos ||
+                          p.find("test") != string::npos ||
+                          p.find("debug") != string::npos) {
+                    classify = "SUSPECT";  // May be internal or experimental
+                }
+                
+                SafePrint("   🧟 [" + classify + "] " + p);
                 AddEndpoint(p);
                 cnt++;
             }
