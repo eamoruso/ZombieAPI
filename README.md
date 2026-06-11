@@ -96,9 +96,9 @@ If you have errors compiling, make sure you have the Curl libraries installed.
 🔬 [DiffFuzz] Probing 16 paths for fingerprint deviation...
 ✅ [DiffFuzz] Complete. Deviating (hidden) paths found: 0
 
-=============================================
+#  
    ZOMBIE API DISCOVERY - FINAL REPORT          
-=============================================
+#  
 
 📊 SUMMARY STATISTICS
 ----------------------------------------
