@@ -18,27 +18,40 @@ If you have errors compiling, make sure you have the Curl libraries installed.
 
 # Example running all 4 modules:
 ./ZombieAPI http://localhost --passive-recon --header-probe --changelog-hunt --diff-fuzz  
-
 #  
-🧠 Application Version: 13.070200 
+🧠 Application Version: 13.070200
+
 🚀 Scanning: http://localhost 
+
 🧵 Using 10 threads 
+
 📊 Crawl depth: 1 
+
 📦 Received 22 bytes (HTTP 404) 
+
 🧟 ROOT URL IS AN API ENDPOINT! 
+
 🎯 Initial endpoints found on start page: 0 
+
 🎯 Fuzzing 16 common API paths... 
+
 ✅ Fuzzing complete. Potential APIs found: 0 
+
 🕷️  Starting crawl from: http://localhost 
+
 📍 Depth 0: Processing 1 URLs 
+
 🧟 API ENDPOINT DETECTED: http://localhost (Status: 404)  
+
 ✅ Depth 0 complete. Endpoints found: 0, API responses detected: 1  
+
 📍 Depth 1: No more URLs to crawl  
  
 🔍 Endpoints found after crawl: 1  
    🧟 http://localhost  
 
 🔎 [PassiveRecon] Starting passive hidden-endpoint discovery on: http://localhost
+
 📄 [PassiveRecon] OpenAPI/Swagger spec found: http://localhost/openapi.json
    🧟 [NORMAL] http://localhost/analytics/products
    🧟 [NORMAL] http://localhost/analytics/revenue
