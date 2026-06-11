@@ -93,31 +93,37 @@ If you have errors compiling, make sure you have the Curl libraries installed.
    🧟 [NORMAL] http://localhost/users/{user_id}/orders
    🧟 [NORMAL] http://localhost/users/{user_id}/stats
    🧟 [NORMAL] http://localhost/version
+   
 ✅ [PassiveRecon] Complete. Hidden references discovered: 40
 
 👻 [HeaderProbe] Probing 1 endpoints with manipulated routing headers...
+
 ✅ [HeaderProbe] Complete. Shadow routes detected: 0
 
 📜 [ChangelogHunt] Probing debug/actuator/well-known paths on: http://localhost
    📜 [SUSPECT] http://localhost/version → HTTP 200
    📜 [SUSPECT] http://localhost/redoc → HTTP 200
    📜 [SUSPECT] http://localhost/metrics → HTTP 200
+
 ✅ [ChangelogHunt] Complete. Debug/internal paths responded: 3
 
 🔬 [DiffFuzz] Establishing 404 baseline for: http://localhost
    Baseline: HTTP 404 / 22 bytes
+
 🔬 [DiffFuzz] Probing 16 paths for fingerprint deviation...
+
 ✅ [DiffFuzz] Complete. Deviating (hidden) paths found: 0
 
-#  
-   ZOMBIE API DISCOVERY - FINAL REPORT          
-#  
+   ZOMBIE API DISCOVERY - FINAL REPORT            
 
 📊 SUMMARY STATISTICS
 ----------------------------------------
 Total Endpoints Discovered:      42
+
 Zombie APIs Detected:            0 (0%)
+
 Suspect Endpoints Found:         7 (16%)
+
 Normal API Endpoints:            35 (83%)
 
 
