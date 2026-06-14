@@ -1,7 +1,8 @@
 //
 //  ZombieAPI.cpp
 //
-//  Created by Edward Amoruso on 1/18/26
+//  Created by Edward Amoruso on 2/18/26
+//
 //
 
 #include <iostream>
@@ -23,7 +24,7 @@
 #include <random>
 #include <curl/curl.h>
 
-#define APP_VERSION 13.0702
+#define APP_VERSION 13.0708
 #define RANDOM_FUZZ_LIMIT 7013
 
 using namespace std;
@@ -117,7 +118,13 @@ mutex g_learningMutex;
 const vector<string> COMMON_API_PATHS = {
     "/api", "/api/v1", "/api/v2", "/api/v3", "/api/v4", "/api/v5",
     "/data", "/data/v1","/data/v2","/data/v3","/data/v4",
-    "/value", "/value/v1", "/value/v2", "/val", "/val/1"
+    "/value", "/value/v1", "/value/v2", "/val", "/val/1",
+    "/api/v1/users", "/api/v1/profiles", "/api/v1/products", "/api/v1/orders",
+    "/api/v1/auth", "/api/v1/system", "/api/v1/movies", "/api/v1/books",
+    "/api/v1/weather", "/api/v1/countries", "/api/v1/recipes", "/api/v1/cars",
+    "/api/v1/search", "/api/v1/health", "/api/v1/status", "/api/v1/info",
+    "/api/v1/docs", "/api/v1/api", "/api-docs",
+    "/redoc", "/docs", "/swagger", "/swagger-ui", "/rapidoc"
 };
 const vector<string> prefixes = {
     "/api", "/v1", "/v2", "/v3", "v4", "/admin", "/internal",
@@ -148,7 +155,11 @@ void DiffFuzz(const string& baseUrl, const vector<string>& paths,
               int threads, int delayMs, bool noVerifySsl);
 vector<string> ExtractFromSourceMap(const string& mapJson);
 vector<string> ExtractFromOpenApiSpec(const string& specBody, const string& baseUrl);
+vector<string> ExpandAndProbeTemplatePaths(const string& specBody, const string& baseUrl,
+                                            int delayMs, bool noVerifySsl);
 string BodyFingerprint(const string& body);
+void ProbeSubPaths(const string& baseUrl, const vector<string>& endpoints,
+                   int threads, int delayMs, bool noVerifySsl);
 
 // --- Thread Safe Logging ---
 mutex g_print_mutex;
@@ -695,11 +706,11 @@ void FuzzCommonEndpoints(const string& baseUrl, int threads, int delayMs) {
 
     for (const auto& path : COMMON_API_PATHS) {
         pool.enqueue([baseUrl, path, delayMs, &fuzzMutex, &found]() {
-            string url = baseUrl + path;
+            string url = JoinUrl(baseUrl, path);
             HttpResult res = HttpRequest(url, "GET", {}, "", delayMs);
 
             if (res.success && (res.status == 200 || res.status == 401 ||
-                res.status == 403 || res.status == 405)) {
+                res.status == 403 || res.status == 405 || res.status == 429)) {
                 if (IsApiResponse(res) || res.status == 401 || res.status == 403) {
                     SafePrint("🧟 Potential API: " + url + " (HTTP " +
                              to_string(res.status) + ")");
@@ -911,13 +922,60 @@ vector<string> ExtractFromOpenApiSpec(const string& specBody,
         auto begin = sregex_iterator(specBody.begin(), specBody.end(), *rep);
         for (auto it = begin; it != sregex_iterator(); ++it) {
             string path = (*it)[1].str();
-            // Skip pure version anchors like /v1 already in COMMON_API_PATHS
-            if (path.size() > 3)
+            // Skip template parameters (e.g., /users/{user_id}) — handled separately
+            if (path.find('{') == string::npos)
                 unique.insert(JoinUrl(baseUrl, path));
         }
     }
 
     found.assign(unique.begin(), unique.end());
+    return found;
+}
+
+// ---------------------------------------------------------------------------
+// ExpandAndProbeTemplatePaths — extract template paths (e.g., /served/{years})
+// from the spec, substitute smart parameter values, probe with HTTP, and
+// return only the working endpoints.
+// ---------------------------------------------------------------------------
+vector<string> ExpandAndProbeTemplatePaths(const string& specBody, const string& baseUrl,
+                                            int delayMs, bool noVerifySsl) {
+    vector<string> found;
+    static const regex jsonPath(R"rx("(/[a-zA-Z0-9_/\-{}]+)"\s*:)rx");
+    static const regex yamlPath(R"(^\s{0,4}(/[a-zA-Z0-9_/\-{}]+)\s*:)", regex::multiline);
+    static const regex tmplParam(R"(\{(\w+)\})");
+
+    set<string> expanded;
+
+    const regex* reList[] = {&jsonPath, &yamlPath};
+    for (const auto* rep : reList) {
+        auto begin = sregex_iterator(specBody.begin(), specBody.end(), *rep);
+        for (auto it = begin; it != sregex_iterator(); ++it) {
+            string path = (*it)[1].str();
+            if (path.find('{') == string::npos) continue;
+
+            string resolved = path;
+            smatch pm;
+            while (regex_search(resolved, pm, tmplParam)) {
+                string pname = pm[1].str();
+                string sub = "1";
+                if (pname == "year" || pname == "years") sub = "2024";
+                resolved.replace(pm.position(0), pm.length(0), sub);
+            }
+            if (resolved != path)
+                expanded.insert(JoinUrl(baseUrl, resolved));
+        }
+    }
+
+    for (const auto& url : expanded) {
+        HttpResult r = HttpRequest(url, "GET", {}, "", delayMs, noVerifySsl);
+        if (r.success && r.status >= 200 && r.status < 500 && r.status != 404 && r.status != 410) {
+            string classify = "NORMAL";
+            if (url.find("/v0") != string::npos || url.find("/old") != string::npos)
+                classify = "ZOMBIE";
+            SafePrint("   🧟 [" + classify + "] " + url + " (template expansion)");
+            found.push_back(url);
+        }
+    }
     return found;
 }
 
@@ -943,7 +1001,7 @@ void PassiveRecon(const string& baseUrl, int threads, int delayMs, bool noVerify
 
     // ---- 1. robots.txt ----
     pool.enqueue([&, baseUrl, delayMs, noVerifySsl]() {
-        string url = baseUrl + "/robots.txt";
+        string url = JoinUrl(baseUrl, "/robots.txt");
         HttpResult r = HttpRequest(url, "GET", {}, "", delayMs, noVerifySsl);
         if (!r.success || r.status != 200) return;
 
@@ -1026,11 +1084,6 @@ void PassiveRecon(const string& baseUrl, int threads, int delayMs, bool noVerify
                     p.find("legacy") != string::npos ||
                     p.find("deprecated") != string::npos) {
                     classify = "ZOMBIE";  
-                } else if (p.find("/beta") != string::npos ||
-                          p.find("/alpha") != string::npos ||
-                          p.find("test") != string::npos ||
-                          p.find("debug") != string::npos) {
-                    classify = "SUSPECT";  // May be internal or experimental
                 }
                 
                 SafePrint("   🧟 [" + classify + "] " + p);
@@ -1039,6 +1092,56 @@ void PassiveRecon(const string& baseUrl, int threads, int delayMs, bool noVerify
             }
             lock_guard<mutex> lk(reconMutex);
             totalFound += cnt;
+        });
+    }
+
+    // ---- 3b. Expand and probe template paths from the spec ---- 
+    // (Runs after the spec is fetched above; re-fetches the spec if needed)
+    for (const auto& specPath : specPaths) {
+        pool.enqueue([&, baseUrl, specPath, delayMs, noVerifySsl]() {
+            string url = JoinUrl(baseUrl, specPath);
+            HttpResult r = HttpRequest(url, "GET", {}, "", delayMs, noVerifySsl);
+            if (!r.success || r.status != 200 || r.body.size() < 20) return;
+            bool looksLikeSpec = (r.body.find("\"paths\"") != string::npos ||
+                                  r.body.find("paths:")    != string::npos ||
+                                  r.body.find("\"swagger\"")!= string::npos ||
+                                  r.body.find("\"openapi\"")!= string::npos);
+            if (!looksLikeSpec) return;
+            auto tmplPaths = ExpandAndProbeTemplatePaths(r.body, baseUrl, delayMs, noVerifySsl);
+            int cnt = 0;
+            for (const auto& p : tmplPaths) {
+                string classify = "NORMAL";
+                if (p.find("/v0") != string::npos || p.find("/old") != string::npos)
+                    classify = "ZOMBIE";
+                SafePrint("   🧟 [" + classify + "] " + p);
+                AddEndpoint(p);
+                cnt++;
+            }
+            lock_guard<mutex> lk(reconMutex);
+            totalFound += cnt;
+        });
+    }
+
+    // ---- 3c. Probe common API documentation pages ----
+    const vector<string> docPaths = {
+        "/redoc", "/docs", "/swagger", "/swagger-ui", "/rapidoc",
+        "/api-docs", "/api/documentation", "/documentation"
+    };
+    for (const auto& docPath : docPaths) {
+        pool.enqueue([&, baseUrl, docPath, delayMs, noVerifySsl]() {
+            string url = JoinUrl(baseUrl, docPath);
+            HttpResult r = HttpRequest(url, "GET", {}, "", delayMs, noVerifySsl);
+            if (!r.success || r.status != 200) return;
+            // Only flag HTML doc pages; raw API endpoints handled elsewhere
+            if (r.body.find("<!DOCTYPE html") != string::npos ||
+                r.body.find("<html") != string::npos ||
+                r.body.find("ReDoc") != string::npos ||
+                r.body.find("Swagger") != string::npos) {
+                SafePrint("   📖 [doc-page] API documentation: " + url);
+                AddEndpoint(url);
+                lock_guard<mutex> lk(reconMutex);
+                totalFound++;
+            }
         });
     }
 
@@ -1302,7 +1405,6 @@ void ChangelogHunt(const string& baseUrl, int threads, int delayMs, bool noVerif
                 }
                 
                 if (score >= 60) classify = "ZOMBIE";
-                else if (score >= 50) classify = "SUSPECT";
                 
                 string tag = "";
                 if (r.status == 401 || r.status == 403) {
@@ -1388,7 +1490,7 @@ void DiffFuzz(const string& baseUrl,
     SafePrint("\n🔬 [DiffFuzz] Establishing 404 baseline for: " + baseUrl);
 
     // Step 1: baseline fingerprint
-    string sentinel = baseUrl + "/____zombieapi_does_not_exist_9f3a7b____";
+    string sentinel = JoinUrl(baseUrl, "/____zombieapi_does_not_exist_9f3a7b____");
     HttpResult base404 = HttpRequest(sentinel, "GET", {}, "", delayMs, noVerifySsl);
     if (!base404.success) {
         SafePrint("⚠️  [DiffFuzz] Could not reach target for baseline — skipping.");
@@ -1440,8 +1542,6 @@ void DiffFuzz(const string& baseUrl,
                     regex_search(path, regex(R"((/v[0-9]+)(/|$))"))) {
                     score += 15;
                     classify = "ZOMBIE";
-                } else if (!classify.empty() && classify == "NORMAL" && score >= 70) {
-                    classify = "SUSPECT";  
                 }
                 
                 if (classify == "NORMAL") classify = "HIDDEN";  // Label normal hidden endpoints
@@ -1559,6 +1659,97 @@ vector<string> GenerateSubPaths(const string& basePath) {
     return subPaths;
 }
 
+void ProbeSubPaths(const string& baseUrl, const vector<string>& endpoints,
+                    int threads, int delayMs, bool noVerifySsl)
+{
+    (void)baseUrl;
+    SafePrint("\n🔍 [ProbeSubPaths] Probing sub-paths on " +
+              to_string(endpoints.size()) + " discovered endpoints...");
+
+    mutex probeMutex;
+    int found = 0;
+    ThreadPool pool(threads);
+
+    for (const auto& ep : endpoints) {
+        pool.enqueue([ep, delayMs, noVerifySsl, &probeMutex, &found]() {
+            // Fetch the endpoint to extract actual item IDs from the response
+            HttpResult collection = HttpRequest(ep, "GET", {}, "", delayMs, noVerifySsl);
+            vector<string> itemIds;
+            if (collection.success && collection.status == 200 && !collection.body.empty()) {
+                string body = collection.body;
+                if (body.size() > 10000) body = body.substr(0, 10000);
+                // Extract integer IDs from common fields
+                static const regex idRe(R"xx("(?:id|user_id|product_id|order_id|file_id|log_id|book_id|movie_id|recipe_id)"\s*:\s*(\d+))xx");
+                smatch m;
+                string::const_iterator searchStart = body.cbegin();
+                while (regex_search(searchStart, body.cend(), m, idRe)) {
+                    itemIds.push_back(m[1].str());
+                    searchStart = m.suffix().first;
+                }
+                // Also extract string IDs (e.g., "order_id":"ORD-1")
+                static const regex strIdRe(R"zz("(?:id|order_id|user_id|product_id|file_id|log_id)"\s*:\s*"([^"]+)")zz");
+                searchStart = body.cbegin();
+                while (regex_search(searchStart, body.cend(), m, strIdRe)) {
+                    itemIds.push_back(m[1].str());
+                    searchStart = m.suffix().first;
+                }
+            }
+
+            // Deduplicate IDs
+            sort(itemIds.begin(), itemIds.end());
+            itemIds.erase(unique(itemIds.begin(), itemIds.end()), itemIds.end());
+
+            auto subPaths = GenerateSubPaths(ep);
+            // Generate ID sub-paths from extracted IDs
+            vector<string> idPaths;
+            for (const auto& id : itemIds) {
+                idPaths.push_back(ep + "/" + id);
+            }
+
+            // Probe named suffixes (skip numeric IDs handled separately)
+            for (const auto& subPath : subPaths) {
+                bool isNumericId = false;
+                for (int i = 1; i <= 5; i++) {
+                    if (subPath == ep + "/" + to_string(i)) {
+                        isNumericId = true;
+                        break;
+                    }
+                }
+                if (isNumericId) continue;
+
+                HttpResult r = HttpRequest(subPath, "GET", {}, "", delayMs, noVerifySsl);
+                if (!r.success) continue;
+                if (r.status != 404 && r.status != 410 && r.status != 422 && r.status != 429 && IsApiResponse(r)) {
+                    AddEndpoint(subPath);
+                    {
+                        lock_guard<mutex> lk(probeMutex);
+                        found++;
+                    }
+                    SafePrint("   ➕ " + subPath + " (HTTP " + to_string(r.status) + ")");
+                }
+            }
+
+            // Probe extracted item IDs
+            for (const auto& idPath : idPaths) {
+                HttpResult r = HttpRequest(idPath, "GET", {}, "", delayMs, noVerifySsl);
+                if (!r.success) continue;
+                if (r.status != 404 && r.status != 410 && r.status != 422 && r.status != 429 && IsApiResponse(r)) {
+                    AddEndpoint(idPath);
+                    {
+                        lock_guard<mutex> lk(probeMutex);
+                        found++;
+                    }
+                    SafePrint("   ➕ " + idPath + " (HTTP " + to_string(r.status) + ")");
+                }
+            }
+        });
+    }
+
+    pool.waitAll();
+    SafePrint("✅ [ProbeSubPaths] Complete. New endpoints discovered: " +
+              to_string(found));
+}
+
 void RandomizedFuzz(const string& baseUrl,
                     int threads,
                     int delayMs,
@@ -1569,7 +1760,7 @@ void RandomizedFuzz(const string& baseUrl,
     SafePrint("\n🎲 [RandomizedFuzz] Starting enhanced endpoint discovery...");
 
     // Step 1: Establish baseline 404 fingerprint
-    string sentinel = baseUrl + "/__zombieapi_baseline_" + GenerateRandomString(8);
+    string sentinel = JoinUrl(baseUrl, "/__zombieapi_baseline_" + GenerateRandomString(8));
     HttpResult base = HttpRequest(sentinel, "GET", {}, "", delayMs, noVerifySsl);
 
     if (!base.success) {
@@ -1705,7 +1896,7 @@ void RandomizedFuzz(const string& baseUrl,
                 }
             }
 
-            string candidate = baseUrl + path;
+            string candidate = JoinUrl(baseUrl, path);
 
             // === DEDUPLICATION ===
             {
@@ -1728,8 +1919,9 @@ void RandomizedFuzz(const string& baseUrl,
             // === FILTER 2: Must look like an API response ===
             if (!IsApiResponse(r)) return;
 
-            // === FILTER 2.5: Reject error-only responses (e.g., 405 with just {"detail":"Method Not Allowed"}) ===
-            if (IsErrorOnlyResponse(r.body)) {
+            // === FILTER 2.5: Reject error-only responses (e.g., 405 with just {"detail":"Method Not Allowed"})
+            // Skip for 429 (rate limit) — 429 itself indicates the endpoint exists
+            if (r.status != 429 && IsErrorOnlyResponse(r.body)) {
                 return;  // Response contains only error fields, not actual endpoint data
             }
 
@@ -1778,7 +1970,7 @@ void RandomizedFuzz(const string& baseUrl,
             }
 
             // === FILTER 6.5: Verified response must also not be error-only ===
-            if (IsErrorOnlyResponse(verify.body)) {
+            if (verify.status != 429 && IsErrorOnlyResponse(verify.body)) {
                 return;  // Verified response is also just an error message
             }
 
@@ -1802,9 +1994,6 @@ void RandomizedFuzz(const string& baseUrl,
             if (candidate.find("/v0") != string::npos || 
                 regex_search(candidate, regex(R"((/v[0-9]+)(/|$))"))) {
                 classify = "ZOMBIE";  // Versioned endpoints are potential zombies
-            } else if (candidate.find("legacy") != string::npos ||  
-                      candidate.find("beta") != string::npos) {
-                classify = "SUSPECT";
             }
             
             stringstream ss;
@@ -1896,6 +2085,25 @@ int main(int argc, const char* argv[]) {
         AddEndpoint(ep);
     }
 
+    // Also fetch the root URL (scheme+host) to extract additional endpoints
+    {
+        string rootUrl = ExtractHost(opts.url);
+        if (!rootUrl.empty()) {
+            HttpResult rootRes = HttpRequest(rootUrl + "/", "GET", {}, "", opts.delayMs, opts.noVerifySsl);
+            if (rootRes.success) {
+                SafePrint("📦 Root page: " + to_string(rootRes.size) + " bytes (HTTP " +
+                          to_string(rootRes.status) + ")");
+                auto rootEndpoints = ExtractEndpoints(rootRes.body, rootUrl);
+                if (!rootEndpoints.empty()) {
+                    SafePrint("🎯 Found " + to_string(rootEndpoints.size()) + " endpoints from root page");
+                    for (const auto& ep : rootEndpoints) {
+                        AddEndpoint(ep);
+                    }
+                }
+            }
+        }
+    }
+
     // Always probe common API paths as a baseline discovery step
     FuzzCommonEndpoints(opts.url, opts.threads, opts.delayMs);
 
@@ -1931,6 +2139,14 @@ int main(int argc, const char* argv[]) {
     }
     if (opts.randomFuzz) {
         RandomizedFuzz(opts.url, opts.threads, opts.delayMs, opts.noVerifySsl, RANDOM_FUZZ_LIMIT, opts.fuzzDict);
+    }
+    // Probe sub-paths on all discovered endpoints
+    {
+        lock_guard<mutex> lk(g_endpointsMutex);
+        allEndpoints.assign(g_endpoints.begin(), g_endpoints.end());
+    }
+    if (!allEndpoints.empty()) {
+        ProbeSubPaths(opts.url, allEndpoints, opts.threads, opts.delayMs, opts.noVerifySsl);
     }
     // Final snapshot after all discovery modules complete
     {
@@ -1975,8 +2191,8 @@ int main(int argc, const char* argv[]) {
         SafePrint("         ZOMBIE API DISCOVERY - FINAL REPORT          ");
         SafePrint(string(60, '=') + "\n");
         
-        int zombieCount = 0, suspectCount = 0, normalCount = 0;
-        vector<string> zombieEndpoints, suspectEndpoints, normalEndpoints;
+        int zombieCount = 0, normalCount = 0;
+        vector<string> zombieEndpoints, normalEndpoints;
         unordered_map<string, string> endpointClassifications;
         
         // Classify all endpoints
@@ -1984,19 +2200,11 @@ int main(int argc, const char* argv[]) {
             if (ep.find("[source-map]") == 0 || ep.find("[shadow") != string::npos) continue;
             
             bool isVersioned = regex_search(ep, regex(R"((v[0-9]+|beta|alpha|legacy|deprecated)[/_\s])"));
-            bool isDebugPath = (ep.find("/debug/") != string::npos || 
-                               ep.find("/metrics") != string::npos ||
-                               ep.find("/config") != string::npos ||
-                               (ep.find("/logs") == 0 && ep.size() < 30));  // Only flag simple /logs paths
             
             if (isVersioned) {
                 endpointClassifications[ep] = "ZOMBIE";
                 zombieCount++;
                 zombieEndpoints.push_back(ep);
-            } else if (isDebugPath) {
-                endpointClassifications[ep] = "SUSPECT";
-                suspectCount++;
-                suspectEndpoints.push_back(ep);
             } else {
                 endpointClassifications[ep] = "NORMAL";
                 normalCount++;
@@ -2004,21 +2212,18 @@ int main(int argc, const char* argv[]) {
             }
         }
         
-        int total = zombieCount + suspectCount + normalCount;
+        int total = zombieCount + normalCount;
         
         // Summary Statistics
         SafePrint("\n📊 SUMMARY STATISTICS");
         SafePrint(string(40, '-'));
         if (total > 0) {
             double zombiePct = (double)zombieCount / total * 100.0;
-            double suspectPct = (double)suspectCount / total * 100.0;
             double normalPct = (double)normalCount / total * 100.0;
             
             SafePrint("Total Endpoints Discovered:      " + to_string(total));
             SafePrint("Zombie APIs Detected:            " + to_string(zombieCount) + 
                      " (" + to_string((int)zombiePct) + "%)");
-            SafePrint("Suspect Endpoints Found:         " + to_string(suspectCount) + 
-                     " (" + to_string((int)suspectPct) + "%)");  
             SafePrint("Normal API Endpoints:            " + to_string(normalCount) + 
                      " (" + to_string((int)normalPct) + "%)\n");
         } else {
@@ -2034,25 +2239,16 @@ int main(int argc, const char* argv[]) {
             }
         }
         
-        // Key Discoveries - Suspects  
-        if (!suspectEndpoints.empty()) {
-            SafePrint("\n⚠️  SUSPECT ENDPOINTS (Internal/Debug Paths)");
-            SafePrint(string(50, '-'));
-            for (const auto& ep : suspectEndpoints) {
-                SafePrint("  🔍 " + ep);
-            }
-        }
-        
         // Key Discoveries - Normal APIs (if any)
         if (!normalEndpoints.empty()) {
             SafePrint("\n✅ NORMAL API ENDPOINTS");
             SafePrint(string(50, '-'));
             int shown = 0;
             for (const auto& ep : normalEndpoints) {
-                if (shown < 15 || zombieCount + suspectCount > 0) {
+                if (shown < 15 || zombieCount > 0) {
                     SafePrint("  ✓ " + ep);
                     shown++;
-                } else if (shown == 15 && zombieCount + suspectCount == 0) {
+                } else if (shown == 15 && zombieCount == 0) {
                     SafePrint("  ... and " + to_string(normalEndpoints.size() - 15) + " more");  
                     break;
                 }
@@ -2060,23 +2256,14 @@ int main(int argc, const char* argv[]) {
         }
         
         // Recommendations
-        if (zombieCount > 0 || suspectCount > 0) {
+        if (zombieCount > 0) {
             SafePrint("\n📋 SECURITY RECOMMENDATIONS");
             SafePrint(string(40, '-'));
             
-            if (zombieCount > 0) {
-                SafePrint("  • Review and document all zombie APIs or decommission");
-                SafePrint("  • Implement API lifecycle governance policies");
-                SafePrint("  • Add versioning enforcement at gateway level");
-                SafePrint("  • Schedule deprecated endpoints for removal\n");
-            }
-            
-            if (suspectCount > 0) {
-                SafePrint("  • Audit all debug/internal endpoint access controls");
-                SafePrint("  • Restrict /metrics, /config, /logs to internal use");
-                SafePrint("  • Remove or secure open /redoc Swagger UI instances");
-                SafePrint("  • Implement proper authentication for sensitive paths\n");
-            }
+            SafePrint("  • Review and document all zombie APIs or decommission");
+            SafePrint("  • Implement API lifecycle governance policies");
+            SafePrint("  • Add versioning enforcement at gateway level");
+            SafePrint("  • Schedule deprecated endpoints for removal\n");
         } else {
             SafePrint("\n✅ SCAN COMPLETE: No zombie APIs detected!");
             SafePrint("   All endpoints appear to be properly documented and current.\n");
@@ -2149,7 +2336,12 @@ int main(int argc, const char* argv[]) {
                 if (verifyResult.success) {
                     rec.status = verifyResult.status;
                     rec.size = verifyResult.size;
-                    rec.isApi = IsApiResponse(verifyResult);
+                    // Skip error-only responses (rate limit, 400, etc.)
+                    if (verifyResult.status == 429 || IsErrorOnlyResponse(verifyResult.body)) {
+                        rec.isApi = false;
+                    } else {
+                        rec.isApi = IsApiResponse(verifyResult);
+                    }
                 }
 
                 records.push_back(rec);
