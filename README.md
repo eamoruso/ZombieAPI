@@ -17,8 +17,9 @@ If you have errors compiling, make sure you have the Curl libraries installed.
 <img width="563" height="575" alt="image" src="https://github.com/user-attachments/assets/cebd556d-7abc-4416-94f8-9e26da5070b0" />
 
 # Example when a Zombie API is discovered:
-<img width="509" height="503" alt="image" src="https://github.com/user-attachments/assets/6a6605a2-d6cf-4b6b-aa1f-c42b04df56f0" />
-<img width="517" height="263" alt="image" src="https://github.com/user-attachments/assets/ac3a2b13-6237-4958-91b2-ad59a8f3ba7f" />
+<img width="503" height="800" alt="image" src="https://github.com/user-attachments/assets/d4ea9af2-d9e6-4af1-83e3-9106ef21de13" />
+
+
 
 
 
